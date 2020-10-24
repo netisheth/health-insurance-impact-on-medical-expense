@@ -1,0 +1,156 @@
+---
+title: "Instrumental Variables"
+author: "Neti Sheth"
+date: "10/24/2020"
+output: html_document
+---
+## Objective
+
+We want to study the relationship between healthins and medexpense, i.e., whether having health insurance reduces medical expense
+
+```{r}
+d <- read.csv("HealthInsurance.csv")
+attach(d)
+```
+
+### Visualizations
+
+```{r}
+hist(d$medexpense, breaks=20, prob=T, main="Histogram of medexpense") 
+den <- density(d$medexpense)                    
+lines(den, col="red")
+```
+
+```{r}
+hist(d$logmedexpense, breaks=20, prob=T, main="Histogram of logmedexpense") 
+den <- density(d$logmedexpense)
+lines(den, col="red")
+```
+```{r}
+hist(d$income, breaks=20, prob=T)
+```
+
+```{r}
+hist(d$logincome, breaks=20, prob=T)
+```
+### Variable definition
+
+```{r}
+Y1 <- cbind(logmedexpense)                  # Dependent variable
+Y2 <- cbind(healthins)                      # Endogeneous variable - health insurance will be y in first model and then x in the second
+X1 <- cbind(illnesses, age, logincome)      # Exogeneous variable (controls)
+IV <- cbind(ssiratio)                       # Instrumental variable (related to logincome)
+IValt <- cbind(ssiratio, married)           # Instrumental variables, overidentified
+```
+
+
+```{r}
+summary(Y1)
+summary(Y2)
+summary(X1)
+summary(IV)
+```
+
+### OLS regression
+
+```{r}
+ols <- lm(Y1 ~ Y2 + X1)
+summary(ols)
+```
+
+Finding: OLS model shows that healthins INCREASES medexpense by 7.5% (note: log scale), when controlled for illnesses, age, and logincome. Is this is so, why would anyone buy healthins? Let's check for endogeneity using an instrumental variable and two stage least squares regression.
+
+### 2SLS (2 stage least square) regression
+
+Stage 1: Regress endogeneous variable against exogeneous and instrumental variables
+
+```{r}
+ols1 <- lm (Y2 ~ X1 + IV)                   
+summary(ols1)
+Y2hat <- fitted(ols1)
+```
+
+Stage 2: Regress dependent variable against exogeneous variables and fitted values from Stage 1
+
+```{r}
+ols2 <- lm(Y1 ~ Y2hat + X1)
+summary(ols2)
+```
+
+Finding: healthins REDUCES medexpense by 85.2%, when controlled for illnesses, age, and logincome, and corrected for the endogeneous effects of ssiratio.
+
+### ivreg
+
+The two steps can be combined into a single equation using the ivreg() function in the AER package. Note: In ivreg() syntax, exogeneous variables X1 appears on both sides of the |, endogeneous variable Y2 appears only to the left of the |, and the IV appears only on the right. We can use ivreg(), tsls(), iv-robust() - all give similiar results
+
+```{r}
+#install.packages("AER")
+library(AER)
+ivreg <- ivreg(Y1 ~ Y2 + X1 | X1 + IV)
+summary(ivreg)
+```
+
+Finding: Results are exacttly the same as doing it is two separate stages.
+
+### 2SLS estimation, over-identified case
+
+A proper instrumental variable is the one that impacts dependent variable of first model and not the second one.
+
+```{r}
+ivreg2 <- ivreg(Y1 ~ Y2 + X1 | X1 + IValt)
+summary(ivreg2)
+```
+
+Finding: its atleast in the correct direction. married is a good instrumental variable. employed might be a potential variable as some employers get insurance benefits firm size might have an impact too - we can try that.
+
+### Comparing all the models
+
+```{r}
+library(stargazer)
+stargazer(ols, ols2, ivreg, ivreg2, type="text")
+```
+
+Finding: Effect decrease quite a bit compared to the previous model but remains negative.
+
+### Hausman test for endogeneity
+
+Comparison of coefficients between the OLS and 2SLS models. If coefficients are close, then there is no endogeneity, and we don't need 2SLS. H0: No endogeneity between OLS and 2SLS models. Reject H0 if p<0.05
+
+```{r}
+coef_diff <- coef(ivreg) - coef(ols)
+vcov_diff <- vcov(ivreg) - vcov(ols)
+x2_diff <- as.vector(t(coef_diff) %*% solve(vcov_diff) %*% coef_diff)
+pchisq(x2_diff, df=2, lower.tail=FALSE)
+```
+
+Finding: There is endogeneity in the data; hence our 2SLS model is better.
+
+### Checking for simultaneity (using 2SLS and 3SLS) - Does healthins reduce medexpense or does medexpense reduce healthins?
+
+We must test two alternate equations, using a "simultaneous equation model". Requires systemfit() function from SYSTEMFIT package.
+
+```{r}
+#install.packages("systemfit")
+library(systemfit)
+
+X2 <- cbind(illnesses)                      # Exogeneous variables for second equation
+IV2 <- cbind(firmsize)                      # Instrumental variable for second equation
+eq1 <- Y1 ~ Y2 + X1 + IV
+eq2 <- Y2 ~ Y1 + X2 + IV2
+inst <- ~ X1 + IV + IV2                     # For the system of equation, instrument includes all 
+                                            # exogeneous variables and IV from both equations
+system <- list(eq1=eq1, eq2=eq2)            # Specify system of equations - model that 2 equations
+```
+
+### 2SLS estimation
+
+```{r}
+sls2 <- systemfit(system, "2SLS", inst=inst, data=d)
+summary(sls2)
+```
+
+### 3SLS estimation
+```{r}
+sls3 <- systemfit(system, "3SLS", inst=inst, data=d)
+summary(sls3)
+```
