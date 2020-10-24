@@ -4,7 +4,6 @@
 #' Problem: We want to study the relationship between healthins and medexpense, 
 #' i.e., whether having health insurance reduces medical expense
 
-setwd("C:/Users/abhatt/Desktop/SDM/Data")
 d <- read.csv("HealthInsurance.csv")
 attach(d)
 
